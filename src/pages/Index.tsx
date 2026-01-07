@@ -11,7 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 interface AnalysisResult {
   whatIsHappening: string;
   whyItMatters: string;
-  riskLevel: "Low" | "Medium" | "High";
+  riskLevel: number;
+  riskDescription: string;
   actionToTake: string;
 }
 
@@ -48,6 +49,7 @@ const Index = () => {
         whatIsHappening: data.whatIsHappening,
         whyItMatters: data.whyItMatters,
         riskLevel: data.riskLevel,
+        riskDescription: data.riskDescription,
         actionToTake: data.actionToTake,
       };
 

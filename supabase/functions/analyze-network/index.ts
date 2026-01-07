@@ -27,13 +27,21 @@ Your responses must be:
 - Focused on business impact, not technical details
 - Actionable and reassuring
 
-You must respond with a valid JSON object containing exactly these four fields:
+You must respond with a valid JSON object containing exactly these five fields:
 {
   "whatIsHappening": "A simple explanation of what the network analysis shows",
   "whyItMatters": "The business impact and why the business owner should care",
-  "riskLevel": "Low" or "Medium" or "High",
+  "riskLevel": 1 to 5 (integer, where 1 is lowest risk and 5 is highest risk),
+  "riskDescription": "A detailed 2-3 sentence explanation of what this risk level means for the business, why it was assigned this score, and the potential impact if not addressed",
   "actionToTake": "One clear, simple action step"
 }
+
+Risk Level Guidelines:
+- 1: Minimal risk - Normal network activity, no concerns
+- 2: Low risk - Minor observations that warrant awareness but no immediate action
+- 3: Moderate risk - Some concerning patterns that should be investigated
+- 4: High risk - Significant security concerns requiring prompt attention
+- 5: Critical risk - Immediate action required to protect the business
 
 Always respond with ONLY the JSON object, no additional text.`;
 
@@ -93,16 +101,22 @@ Remember: Respond with ONLY a JSON object containing whatIsHappening, whyItMatte
       analysisResult = {
         whatIsHappening: "Your network was analyzed and appears to be functioning normally. Our AI reviewed the traffic patterns and found typical business activity.",
         whyItMatters: "A healthy network means your business operations can continue without disruption. Regular monitoring helps catch issues before they become problems.",
-        riskLevel: "Low",
+        riskLevel: 1,
+        riskDescription: "Your network shows normal activity patterns with no signs of malicious behavior or security concerns. This indicates your current security measures are working effectively.",
         actionToTake: "Continue your regular security practices and consider scheduling periodic network reviews."
       };
     }
 
     // Validate the response structure
+    const riskLevelNum = typeof analysisResult.riskLevel === 'number' 
+      ? Math.min(5, Math.max(1, analysisResult.riskLevel)) 
+      : 1;
+    
     const validatedResult = {
       whatIsHappening: analysisResult.whatIsHappening || "Network analysis completed.",
       whyItMatters: analysisResult.whyItMatters || "Understanding your network helps protect your business.",
-      riskLevel: ["Low", "Medium", "High"].includes(analysisResult.riskLevel) ? analysisResult.riskLevel : "Low",
+      riskLevel: riskLevelNum,
+      riskDescription: analysisResult.riskDescription || "Analysis completed. Risk assessment based on the network activity patterns observed.",
       actionToTake: analysisResult.actionToTake || "Continue monitoring your network regularly."
     };
 
@@ -119,7 +133,8 @@ Remember: Respond with ONLY a JSON object containing whatIsHappening, whyItMatte
       error: 'Unable to complete the analysis. Please try again.',
       whatIsHappening: "We encountered an issue while analyzing your network data.",
       whyItMatters: "This is temporary and doesn't indicate any problem with your network.",
-      riskLevel: "Low",
+      riskLevel: 1,
+      riskDescription: "Unable to assess risk at this time due to a temporary processing issue.",
       actionToTake: "Please try uploading your file again in a moment."
     }), {
       status: 500,

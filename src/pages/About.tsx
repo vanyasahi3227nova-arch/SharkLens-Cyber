@@ -1,5 +1,6 @@
 import { Header } from "@/components/Header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
 import { Shield, Brain, Users, Target, Eye, BookOpen } from "lucide-react";
 
 const About = () => {
@@ -18,6 +19,29 @@ const About = () => {
             complex security data and executive-level understanding.
           </p>
         </div>
+
+        {/* The Challenge Section */}
+        <Card className="mb-8 shadow-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-primary">
+              <AlertTriangle className="w-6 h-6" />
+              The Challenge
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground leading-relaxed">
+              Organizations generate vast amounts of cybersecurity data through tools like Wireshark, 
+              yet this information is often highly technical and inaccessible to non-experts. Small 
+              business leaders and C-level executives struggle to understand what network activity 
+              means for their organization, why it matters, and what actions to take—without relying 
+              heavily on specialized security teams. This gap between technical security data and 
+              executive understanding leads to delayed decisions, misjudged risks, and underutilized 
+              security insights. This project addresses that challenge by translating complex network 
+              data into clear, business-relevant explanations using AI, enabling informed decision-making 
+              without requiring deep cybersecurity expertise.
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Mission Section */}
         <Card className="mb-8 shadow-card">
