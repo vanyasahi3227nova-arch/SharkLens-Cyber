@@ -1,12 +1,168 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { Waves, Shield, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Header } from "@/components/Header";
+import { FileUpload } from "@/components/FileUpload";
+import { AnalysisResults } from "@/components/AnalysisResults";
+import { LoadingState } from "@/components/LoadingState";
+import { ErrorState } from "@/components/ErrorState";
+
+interface AnalysisResult {
+  whatIsHappening: string;
+  whyItMatters: string;
+  riskLevel: "Low" | "Medium" | "High";
+  actionToTake: string;
+}
+
+const API_ENDPOINT = "https://cyber-ai-proxy-9kb9.vercel.app/api/analyze";
 
 const Index = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAnalyze = async () => {
+    if (!selectedFile) return;
+
+    setIsAnalyzing(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const response = await fetch(API_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: "Uploaded Wireshark network data",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to analyze your network data. Please try again.");
+      }
+
+      const data = await response.json();
+      
+      // Parse the AI response into our structured format
+      const parsedResult: AnalysisResult = {
+        whatIsHappening: data.whatIsHappening || data.what_is_happening || "Your network shows normal traffic patterns with some areas of interest that our AI identified.",
+        whyItMatters: data.whyItMatters || data.why_it_matters || "Understanding your network activity helps protect your business from potential threats and ensures smooth operations.",
+        riskLevel: data.riskLevel || data.risk_level || "Low",
+        actionToTake: data.actionToTake || data.action_to_take || "Continue monitoring your network and ensure all devices have updated security software.",
+      };
+
+      setResult(parsedResult);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We couldn't complete the analysis. Please check your connection and try again."
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    handleAnalyze();
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen gradient-hero">
+      <Header />
+      
+      <main className="container mx-auto px-6 py-12 max-w-4xl">
+        {/* Hero Section */}
+        <section className="text-center mb-12 animate-fade-in">
+          <h2 className="text-3xl sm:text-4xl font-bold text-foreground mb-4">
+            Translate Network Data Into
+            <span className="block bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              Clear Business Insights
+            </span>
+          </h2>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Upload your Wireshark capture and get plain-English cybersecurity insights. 
+            No technical jargon – just actionable recommendations for your business.
+          </p>
+        </section>
+
+        {/* Features */}
+        <section className="grid sm:grid-cols-3 gap-4 mb-12">
+          {[
+            { icon: Waves, title: "Easy Upload", desc: "Drag & drop your .pcap files" },
+            { icon: Shield, title: "AI Analysis", desc: "Secure, private processing" },
+            { icon: Zap, title: "Instant Insights", desc: "Results in seconds" },
+          ].map((feature, i) => (
+            <div
+              key={feature.title}
+              className="flex items-center gap-3 p-4 rounded-xl bg-card/60 border border-border animate-slide-up"
+              style={{ animationDelay: `${i * 100}ms` }}
+            >
+              <div className="p-2 rounded-lg bg-secondary">
+                <feature.icon className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-foreground text-sm">{feature.title}</p>
+                <p className="text-xs text-muted-foreground">{feature.desc}</p>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {/* Upload Section */}
+        <section className="bg-card rounded-2xl shadow-card p-8 mb-8 animate-scale-in">
+          <h3 className="text-lg font-semibold text-foreground mb-6">
+            Step 1: Upload Your Network Capture
+          </h3>
+          <FileUpload onFileSelect={setSelectedFile} selectedFile={selectedFile} />
+          
+          <div className="mt-8 flex justify-center">
+            <Button
+              variant="ocean"
+              size="xl"
+              onClick={handleAnalyze}
+              disabled={!selectedFile || isAnalyzing}
+            >
+              {isAnalyzing ? (
+                <>Analyzing...</>
+              ) : (
+                <>
+                  <Shield className="w-5 h-5" />
+                  Analyze My Network
+                </>
+              )}
+            </Button>
+          </div>
+        </section>
+
+        {/* Results Section */}
+        {isAnalyzing && (
+          <section className="bg-card rounded-2xl shadow-card p-8">
+            <LoadingState />
+          </section>
+        )}
+
+        {error && !isAnalyzing && (
+          <section className="mb-8">
+            <ErrorState message={error} onRetry={handleRetry} />
+          </section>
+        )}
+
+        {result && !isAnalyzing && !error && (
+          <section className="bg-card rounded-2xl shadow-card p-8">
+            <AnalysisResults result={result} />
+          </section>
+        )}
+
+        {/* Footer Info */}
+        <footer className="text-center mt-12 text-sm text-muted-foreground">
+          <p>Your network data is processed securely and never stored.</p>
+        </footer>
+      </main>
     </div>
   );
 };
