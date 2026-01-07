@@ -6,6 +6,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { AnalysisResults } from "@/components/AnalysisResults";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AnalysisResult {
   whatIsHappening: string;
@@ -13,8 +14,6 @@ interface AnalysisResult {
   riskLevel: "Low" | "Medium" | "High";
   actionToTake: string;
 }
-
-const API_ENDPOINT = "https://cyber-ai-proxy-9kb9.vercel.app/api/analyze";
 
 const Index = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -30,28 +29,26 @@ const Index = () => {
     setResult(null);
 
     try {
-      const response = await fetch(API_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: "Uploaded Wireshark network data",
-        }),
+      // Read file content (for demo, we'll send file name and size info)
+      const fileInfo = `Network capture file: ${selectedFile.name}, Size: ${(selectedFile.size / 1024).toFixed(1)} KB. Uploaded Wireshark network data for analysis.`;
+      
+      const { data, error: fnError } = await supabase.functions.invoke('analyze-network', {
+        body: { text: fileInfo },
       });
 
-      if (!response.ok) {
-        throw new Error("Unable to analyze your network data. Please try again.");
+      if (fnError) {
+        throw new Error(fnError.message || "Unable to analyze your network data. Please try again.");
       }
 
-      const data = await response.json();
-      
-      // Parse the AI response into our structured format
+      if (data.error && !data.whatIsHappening) {
+        throw new Error(data.error);
+      }
+
       const parsedResult: AnalysisResult = {
-        whatIsHappening: data.whatIsHappening || data.what_is_happening || "Your network shows normal traffic patterns with some areas of interest that our AI identified.",
-        whyItMatters: data.whyItMatters || data.why_it_matters || "Understanding your network activity helps protect your business from potential threats and ensures smooth operations.",
-        riskLevel: data.riskLevel || data.risk_level || "Low",
-        actionToTake: data.actionToTake || data.action_to_take || "Continue monitoring your network and ensure all devices have updated security software.",
+        whatIsHappening: data.whatIsHappening,
+        whyItMatters: data.whyItMatters,
+        riskLevel: data.riskLevel,
+        actionToTake: data.actionToTake,
       };
 
       setResult(parsedResult);
