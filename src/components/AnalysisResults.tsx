@@ -1,5 +1,6 @@
 import { Shield, AlertTriangle, CheckCircle, Lightbulb, Gauge, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThreatHeatMap, ThreatData } from "./ThreatHeatMap";
 
 interface AnalysisResult {
   whatIsHappening: string;
@@ -8,6 +9,7 @@ interface AnalysisResult {
   riskDescription: string;
   actionToTake: string;
   cybersecurityNews: string;
+  threatMap: ThreatData[];
 }
 
 interface AnalysisResultsProps {
@@ -152,6 +154,9 @@ export const AnalysisResults = ({ result }: AnalysisResultsProps) => {
           content={result.cybersecurityNews}
           delay="350ms"
         />
+        
+        {/* Threat Heat Map Section */}
+        <ThreatHeatMap threats={result.threatMap} />
       </div>
     </div>
   );

@@ -8,6 +8,16 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { supabase } from "@/integrations/supabase/client";
 
+interface ThreatData {
+  threatType: string;
+  sourceIP: string;
+  frequency: number;
+  likelihood: number;
+  impact: number;
+  severity: "low" | "medium" | "high";
+  explanation: string;
+}
+
 interface AnalysisResult {
   whatIsHappening: string;
   whyItMatters: string;
@@ -15,6 +25,7 @@ interface AnalysisResult {
   riskDescription: string;
   actionToTake: string;
   cybersecurityNews: string;
+  threatMap: ThreatData[];
 }
 
 const Index = () => {
@@ -60,6 +71,7 @@ const Index = () => {
         riskDescription: data.riskDescription,
         actionToTake: data.actionToTake,
         cybersecurityNews: data.cybersecurityNews,
+        threatMap: data.threatMap || [],
       };
 
       setResult(parsedResult);

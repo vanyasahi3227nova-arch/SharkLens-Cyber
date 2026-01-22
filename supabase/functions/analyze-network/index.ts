@@ -253,15 +253,39 @@ Your responses must be:
 
 You are analyzing REAL network capture data that has been parsed from a pcap file. Use the actual data provided to give accurate and specific insights.
 
-You must respond with a valid JSON object containing exactly these six fields:
+THREAT ANALYSIS INSTRUCTIONS:
+Analyze the uploaded Wireshark .pcap data and extract potential cybersecurity threats. For each identified threat, determine:
+- Likelihood (1-5): Based on the frequency of suspicious events in the capture (e.g., repeated failed logins, port scans, unusual traffic volume)
+- Impact (1-5): Based on security context (e.g., malware potential, data exfiltration risk, protocol abuse)
+- Severity: "low" (green zone), "medium" (yellow/orange zone), or "high" (red zone)
+
+You must respond with a valid JSON object containing exactly these seven fields:
 {
   "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data",
   "whyItMatters": "The business impact and why the business owner should care",
   "riskLevel": 1 to 5 (integer, where 1 is lowest risk and 5 is highest risk),
   "riskDescription": "A detailed 2-3 sentence explanation of what this risk level means for the business, why it was assigned this score based on the actual network data, and the potential impact if not addressed",
   "actionToTake": "One clear, simple action step based on what was found",
-  "cybersecurityNews": "2-3 interesting and relevant cybersecurity insights, tips, or recent trends that relate to the protocols, services, or patterns found in this specific capture. Make it educational and valuable for SMB owners. Include practical awareness points they should know about."
+  "cybersecurityNews": "2-3 interesting and relevant cybersecurity insights, tips, or recent trends that relate to the protocols, services, or patterns found in this specific capture. Make it educational and valuable for SMB owners. Include practical awareness points they should know about.",
+  "threatMap": [
+    {
+      "threatType": "Name of the threat (e.g., 'Unencrypted HTTP Traffic', 'Suspicious Port Scan', 'Telnet Access Detected')",
+      "sourceIP": "Source IP address or 'Multiple' if from various sources",
+      "frequency": number of occurrences detected,
+      "likelihood": 1-5 based on how likely this is to be exploited,
+      "impact": 1-5 based on potential damage if exploited,
+      "severity": "low" | "medium" | "high",
+      "explanation": "Brief explanation of why this threat falls in its position on the heat map based on the actual traffic patterns observed"
+    }
+  ]
 }
+
+Threat Map Guidelines:
+- Include 0-6 threats based on what's actually found in the data
+- If no concerning activity is found, return an empty array []
+- Likelihood scoring: 1=Rare/unlikely, 2=Uncommon, 3=Possible, 4=Likely, 5=Almost certain
+- Impact scoring: 1=Negligible, 2=Minor, 3=Moderate, 4=Major, 5=Severe/Critical
+- Severity is determined by the combination: Low (L+I ≤ 4), Medium (L+I 5-7), High (L+I ≥ 8)
 
 Risk Level Guidelines:
 - 1: Minimal risk - Normal network activity, no concerns detected in the data
@@ -279,7 +303,7 @@ Always respond with ONLY the JSON object, no additional text.`;
 
 ${networkData}
 
-Remember: Base your analysis on the actual data shown above. Respond with ONLY a JSON object containing whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, and cybersecurityNews.`;
+Remember: Base your analysis on the actual data shown above. Respond with ONLY a JSON object containing whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, and threatMap (array of detected threats for the heat map visualization).`;
 
     console.log('Calling Lovable AI Gateway with parsed pcap data');
 
@@ -334,7 +358,8 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
         riskLevel: 1,
         riskDescription: "Your network shows normal activity patterns with no signs of malicious behavior or security concerns. This indicates your current security measures are working effectively.",
         actionToTake: "Continue your regular security practices and consider scheduling periodic network reviews.",
-        cybersecurityNews: "Regular network monitoring is a best practice for all businesses. Consider implementing automated security scans and keeping all network devices updated with the latest security patches."
+        cybersecurityNews: "Regular network monitoring is a best practice for all businesses. Consider implementing automated security scans and keeping all network devices updated with the latest security patches.",
+        threatMap: []
       };
     }
 
@@ -343,13 +368,27 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
       ? Math.min(5, Math.max(1, analysisResult.riskLevel)) 
       : 1;
     
+    // Validate and normalize threat map data
+    const threatMap = Array.isArray(analysisResult.threatMap) 
+      ? analysisResult.threatMap.map((threat: any) => ({
+          threatType: threat.threatType || "Unknown Threat",
+          sourceIP: threat.sourceIP || "Unknown",
+          frequency: typeof threat.frequency === 'number' ? threat.frequency : 1,
+          likelihood: Math.min(5, Math.max(1, typeof threat.likelihood === 'number' ? threat.likelihood : 1)),
+          impact: Math.min(5, Math.max(1, typeof threat.impact === 'number' ? threat.impact : 1)),
+          severity: ['low', 'medium', 'high'].includes(threat.severity) ? threat.severity : 'low',
+          explanation: threat.explanation || "Detected in network traffic analysis."
+        }))
+      : [];
+
     const validatedResult = {
       whatIsHappening: analysisResult.whatIsHappening || "Network analysis completed.",
       whyItMatters: analysisResult.whyItMatters || "Understanding your network helps protect your business.",
       riskLevel: riskLevelNum,
       riskDescription: analysisResult.riskDescription || "Analysis completed. Risk assessment based on the network activity patterns observed.",
       actionToTake: analysisResult.actionToTake || "Continue monitoring your network regularly.",
-      cybersecurityNews: analysisResult.cybersecurityNews || "Stay informed about the latest cybersecurity trends and best practices to protect your business."
+      cybersecurityNews: analysisResult.cybersecurityNews || "Stay informed about the latest cybersecurity trends and best practices to protect your business.",
+      threatMap: threatMap
     };
 
     console.log('Returning validated result');
@@ -368,7 +407,8 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
       riskLevel: 1,
       riskDescription: "Unable to assess risk at this time due to a temporary processing issue.",
       cybersecurityNews: "While we work on this, remember that regular network monitoring is essential for business security.",
-      actionToTake: "Please try uploading your file again in a moment."
+      actionToTake: "Please try uploading your file again in a moment.",
+      threatMap: []
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
