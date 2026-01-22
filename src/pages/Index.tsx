@@ -30,11 +30,18 @@ const Index = () => {
     setResult(null);
 
     try {
-      // Read file content (for demo, we'll send file name and size info)
-      const fileInfo = `Network capture file: ${selectedFile.name}, Size: ${(selectedFile.size / 1024).toFixed(1)} KB. Uploaded Wireshark network data for analysis.`;
+      // Read the actual file content as base64
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const base64Content = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
       
       const { data, error: fnError } = await supabase.functions.invoke('analyze-network', {
-        body: { text: fileInfo },
+        body: { 
+          fileName: selectedFile.name,
+          fileSize: selectedFile.size,
+          fileContent: base64Content
+        },
       });
 
       if (fnError) {
