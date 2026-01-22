@@ -244,7 +244,7 @@ serve(async (req) => {
       networkData = `Network capture file: ${fileName}, Size: ${(fileSize / 1024).toFixed(1)} KB`;
     }
 
-    const systemPrompt = `You are a cybersecurity expert who translates technical network data into simple, executive-level insights for small business owners. 
+    const systemPrompt = `You are a cybersecurity expert who translates technical network data into simple, executive-level insights for small and medium business enterprise owners. 
 
 Your responses must be:
 - Written in plain English with NO technical jargon
@@ -253,13 +253,14 @@ Your responses must be:
 
 You are analyzing REAL network capture data that has been parsed from a pcap file. Use the actual data provided to give accurate and specific insights.
 
-You must respond with a valid JSON object containing exactly these five fields:
+You must respond with a valid JSON object containing exactly these six fields:
 {
   "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data",
   "whyItMatters": "The business impact and why the business owner should care",
   "riskLevel": 1 to 5 (integer, where 1 is lowest risk and 5 is highest risk),
   "riskDescription": "A detailed 2-3 sentence explanation of what this risk level means for the business, why it was assigned this score based on the actual network data, and the potential impact if not addressed",
-  "actionToTake": "One clear, simple action step based on what was found"
+  "actionToTake": "One clear, simple action step based on what was found",
+  "cybersecurityNews": "2-3 interesting and relevant cybersecurity insights, tips, or recent trends that relate to the protocols, services, or patterns found in this specific capture. Make it educational and valuable for SMB owners. Include practical awareness points they should know about."
 }
 
 Risk Level Guidelines:
@@ -270,14 +271,15 @@ Risk Level Guidelines:
 - 5: Critical risk - Immediate action required to protect the business (e.g., known malicious patterns, active threats)
 
 Base your risk assessment on the ACTUAL protocols, ports, and IP addresses found in the data.
+For the cybersecurity news section, provide insights specific to the types of traffic observed (e.g., if HTTP is detected, discuss risks of unencrypted web traffic; if DNS is present, mention DNS security best practices).
 
 Always respond with ONLY the JSON object, no additional text.`;
 
-    const userPrompt = `Analyze this network capture data and provide insights for a small business owner:
+    const userPrompt = `Analyze this network capture data and provide detailed cybersecurity insights for a small and medium business enterprise owner:
 
 ${networkData}
 
-Remember: Base your analysis on the actual data shown above. Respond with ONLY a JSON object containing whatIsHappening, whyItMatters, riskLevel, riskDescription, and actionToTake.`;
+Remember: Base your analysis on the actual data shown above. Respond with ONLY a JSON object containing whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, and cybersecurityNews.`;
 
     console.log('Calling Lovable AI Gateway with parsed pcap data');
 
@@ -331,7 +333,8 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
         whyItMatters: "A healthy network means your business operations can continue without disruption. Regular monitoring helps catch issues before they become problems.",
         riskLevel: 1,
         riskDescription: "Your network shows normal activity patterns with no signs of malicious behavior or security concerns. This indicates your current security measures are working effectively.",
-        actionToTake: "Continue your regular security practices and consider scheduling periodic network reviews."
+        actionToTake: "Continue your regular security practices and consider scheduling periodic network reviews.",
+        cybersecurityNews: "Regular network monitoring is a best practice for all businesses. Consider implementing automated security scans and keeping all network devices updated with the latest security patches."
       };
     }
 
@@ -345,7 +348,8 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
       whyItMatters: analysisResult.whyItMatters || "Understanding your network helps protect your business.",
       riskLevel: riskLevelNum,
       riskDescription: analysisResult.riskDescription || "Analysis completed. Risk assessment based on the network activity patterns observed.",
-      actionToTake: analysisResult.actionToTake || "Continue monitoring your network regularly."
+      actionToTake: analysisResult.actionToTake || "Continue monitoring your network regularly.",
+      cybersecurityNews: analysisResult.cybersecurityNews || "Stay informed about the latest cybersecurity trends and best practices to protect your business."
     };
 
     console.log('Returning validated result');
@@ -363,6 +367,7 @@ Remember: Base your analysis on the actual data shown above. Respond with ONLY a
       whyItMatters: "This is temporary and doesn't indicate any problem with your network.",
       riskLevel: 1,
       riskDescription: "Unable to assess risk at this time due to a temporary processing issue.",
+      cybersecurityNews: "While we work on this, remember that regular network monitoring is essential for business security.",
       actionToTake: "Please try uploading your file again in a moment."
     }), {
       status: 500,

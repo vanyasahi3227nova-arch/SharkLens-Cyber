@@ -14,6 +14,7 @@ interface AnalysisResult {
   riskLevel: number;
   riskDescription: string;
   actionToTake: string;
+  cybersecurityNews: string;
 }
 
 const Index = () => {
@@ -58,6 +59,7 @@ const Index = () => {
         riskLevel: data.riskLevel,
         riskDescription: data.riskDescription,
         actionToTake: data.actionToTake,
+        cybersecurityNews: data.cybersecurityNews,
       };
 
       setResult(parsedResult);

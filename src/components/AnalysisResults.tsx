@@ -1,4 +1,4 @@
-import { Shield, AlertTriangle, CheckCircle, Lightbulb, Gauge } from "lucide-react";
+import { Shield, AlertTriangle, CheckCircle, Lightbulb, Gauge, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AnalysisResult {
@@ -7,6 +7,7 @@ interface AnalysisResult {
   riskLevel: number;
   riskDescription: string;
   actionToTake: string;
+  cybersecurityNews: string;
 }
 
 interface AnalysisResultsProps {
@@ -144,6 +145,12 @@ export const AnalysisResults = ({ result }: AnalysisResultsProps) => {
           title="Recommended Action"
           content={result.actionToTake}
           delay="250ms"
+        />
+        <InsightCard
+          icon={Newspaper}
+          title="Interesting Cybersecurity News for Your Capture!"
+          content={result.cybersecurityNews}
+          delay="350ms"
         />
       </div>
     </div>
