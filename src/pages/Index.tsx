@@ -25,6 +25,7 @@ interface AnalysisResult {
   riskDescription: string;
   actionToTake: string;
   cybersecurityNews: string;
+  forensicAnalysis: string;
   threatMap: ThreatData[];
 }
 
@@ -71,6 +72,7 @@ const Index = () => {
         riskDescription: data.riskDescription,
         actionToTake: data.actionToTake,
         cybersecurityNews: data.cybersecurityNews,
+        forensicAnalysis: data.forensicAnalysis || "",
         threatMap: data.threatMap || [],
       };
 

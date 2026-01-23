@@ -1,4 +1,4 @@
-import { Shield, AlertTriangle, CheckCircle, Lightbulb, Gauge, Newspaper } from "lucide-react";
+import { Shield, AlertTriangle, CheckCircle, Lightbulb, Gauge, Newspaper, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThreatHeatMap, ThreatData } from "./ThreatHeatMap";
 
@@ -9,6 +9,7 @@ interface AnalysisResult {
   riskDescription: string;
   actionToTake: string;
   cybersecurityNews: string;
+  forensicAnalysis: string;
   threatMap: ThreatData[];
 }
 
@@ -149,10 +150,16 @@ export const AnalysisResults = ({ result }: AnalysisResultsProps) => {
           delay="250ms"
         />
         <InsightCard
+          icon={Search}
+          title="Deep Forensic Analysis"
+          content={result.forensicAnalysis}
+          delay="350ms"
+        />
+        <InsightCard
           icon={Newspaper}
           title="Interesting Cybersecurity News for Your Capture!"
           content={result.cybersecurityNews}
-          delay="350ms"
+          delay="450ms"
         />
         
         {/* Threat Heat Map Section */}

@@ -271,7 +271,7 @@ For each identified threat, determine:
 - Severity: "low" (green zone), "medium" (yellow/orange zone), or "high" (red zone)
 - Confidence Level: Express how confident you are in each finding (Low/Medium/High)
 
-You must respond with a valid JSON object containing exactly these seven fields:
+You must respond with a valid JSON object containing exactly these eight fields:
 {
   "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data. Include your confidence level.",
   "whyItMatters": "The business impact and why the business owner should care. Be specific about potential consequences.",
@@ -279,6 +279,7 @@ You must respond with a valid JSON object containing exactly these seven fields:
   "riskDescription": "A detailed 2-3 sentence explanation including: what this risk level means for the business, why it was assigned this score based on the actual network data, your confidence in this assessment, and the potential impact if not addressed",
   "actionToTake": "Clear, prioritized action steps based on severity. Include recommended follow-up investigation steps or mitigations.",
   "cybersecurityNews": "2-3 relevant cybersecurity insights that relate to the specific attack types, protocols, or patterns found in this capture. Include practical awareness points and recent trends SMB owners should know about.",
+  "forensicAnalysis": "A deeper forensic review including: traffic timelines and patterns observed, any lateral movement indicators, persistence or beaconing patterns detected, false positive likelihood assessment, and additional technical context for security teams.",
   "threatMap": [
     {
       "threatType": "Name of the threat with classification (e.g., 'Port Scan - Reconnaissance', 'Suspicious DNS - Potential C2')",
@@ -306,6 +307,8 @@ Risk Level Guidelines:
 - 4: High risk - Significant security concerns requiring prompt attention (e.g., suspicious connections, dangerous services).
 - 5: Critical risk - Immediate action required (e.g., active threats, known malicious patterns, data exfiltration indicators).
 
+IMPORTANT: Return your analysis EXACTLY as structured above. Do NOT modify, summarize, or interpret the findings. Pass through your expert analysis verbatim in the JSON format.
+
 Always respond with ONLY the JSON object, no additional text.`;
 
     const userPrompt = `STRUCTURED NETWORK TRAFFIC DATA:
@@ -320,7 +323,14 @@ Analyze the above network capture data extracted from a Wireshark PCAP file. As 
 4. Assess severity with confidence levels
 5. Provide recommended follow-up investigation steps or mitigations
 
-Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, and threatMap.`;
+FOLLOW-UP FORENSIC ANALYSIS:
+Based on the initial analysis, perform a deeper forensic review focusing on:
+- Traffic timelines and temporal patterns
+- Lateral movement indicators across the network
+- Persistence or beaconing patterns that suggest ongoing compromise
+- False positive likelihood for each finding
+
+Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, forensicAnalysis, and threatMap.`;
 
     console.log('Calling Lovable AI Gateway with parsed pcap data');
 
@@ -376,6 +386,7 @@ Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskL
         riskDescription: "Your network shows normal activity patterns with no signs of malicious behavior or security concerns. This indicates your current security measures are working effectively.",
         actionToTake: "Continue your regular security practices and consider scheduling periodic network reviews.",
         cybersecurityNews: "Regular network monitoring is a best practice for all businesses. Consider implementing automated security scans and keeping all network devices updated with the latest security patches.",
+        forensicAnalysis: "No suspicious forensic indicators detected. Traffic patterns appear consistent with normal business operations. No beaconing, lateral movement, or persistence mechanisms identified.",
         threatMap: []
       };
     }
@@ -398,6 +409,7 @@ Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskL
         }))
       : [];
 
+    // Pass through the AI's analysis verbatim - do not modify, summarize, or interpret
     const validatedResult = {
       whatIsHappening: analysisResult.whatIsHappening || "Network analysis completed.",
       whyItMatters: analysisResult.whyItMatters || "Understanding your network helps protect your business.",
@@ -405,6 +417,7 @@ Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskL
       riskDescription: analysisResult.riskDescription || "Analysis completed. Risk assessment based on the network activity patterns observed.",
       actionToTake: analysisResult.actionToTake || "Continue monitoring your network regularly.",
       cybersecurityNews: analysisResult.cybersecurityNews || "Stay informed about the latest cybersecurity trends and best practices to protect your business.",
+      forensicAnalysis: analysisResult.forensicAnalysis || "Forensic analysis pending. Please re-run the analysis for detailed forensic insights.",
       threatMap: threatMap
     };
 
@@ -425,6 +438,7 @@ Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskL
       riskDescription: "Unable to assess risk at this time due to a temporary processing issue.",
       cybersecurityNews: "While we work on this, remember that regular network monitoring is essential for business security.",
       actionToTake: "Please try uploading your file again in a moment.",
+      forensicAnalysis: "Forensic analysis could not be completed due to a processing error.",
       threatMap: []
     }), {
       status: 500,
