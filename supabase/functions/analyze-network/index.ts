@@ -18,167 +18,371 @@ function parsePcapFile(base64Content: string, fileName: string): string {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
+    console.log('File bytes (first 20):', Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
     // Check for pcap magic number (0xa1b2c3d4 or 0xd4c3b2a1 for swapped)
     const magicNumber = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
-    const isPcap = magicNumber === 0xa1b2c3d4 || magicNumber === 0xd4c3b2a1;
-    const isPcapNg = bytes[0] === 0x0a && bytes[1] === 0x0d && bytes[2] === 0x0d && bytes[3] === 0x0a;
+    const magicNumberLE = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
     
-    if (!isPcap && !isPcapNg) {
-      // Try alternate pcapng detection
-      const isPcapNgAlt = (bytes[0] === 0x0a && bytes[1] === 0x0d) || 
-                          (bytes[8] === 0x1a && bytes[9] === 0x2b && bytes[10] === 0x3c && bytes[11] === 0x4d);
-      if (!isPcapNgAlt) {
-        return `File: ${fileName}\nFile appears to be a network capture file.\nSize: ${bytes.length} bytes\nFormat: Unknown pcap variant\n\nNote: File structure analysis in progress.`;
-      }
-    }
+    const isPcapBE = magicNumber === 0xa1b2c3d4;
+    const isPcapLE = magicNumber === 0xd4c3b2a1;
+    const isPcap = isPcapBE || isPcapLE;
     
-    // Determine byte order
-    const swapped = magicNumber === 0xd4c3b2a1;
+    // pcapng Section Header Block magic (0x0A0D0D0A) - same in both endianness
+    const isPcapNg = magicNumber === 0x0a0d0d0a || magicNumberLE === 0x0a0d0d0a;
     
-    // Read pcap global header (24 bytes)
-    const readUint16 = (offset: number): number => {
-      if (swapped) {
-        return (bytes[offset + 1] << 8) | bytes[offset];
-      }
-      return (bytes[offset] << 8) | bytes[offset + 1];
-    };
-    
-    const readUint32 = (offset: number): number => {
-      if (swapped) {
-        return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
-      }
-      return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
-    };
+    console.log('Format detection - isPcap:', isPcap, 'isPcapNg:', isPcapNg, 'magic:', magicNumber.toString(16));
     
     let packetInfo: string[] = [];
     packetInfo.push(`File: ${fileName}`);
     packetInfo.push(`File Size: ${bytes.length} bytes`);
-    packetInfo.push(`Format: ${isPcapNg ? 'pcapng' : 'pcap'}`);
     
-    if (isPcap) {
-      const versionMajor = readUint16(4);
-      const versionMinor = readUint16(6);
-      const snapLen = readUint32(16);
-      const linkType = readUint32(20);
+    if (isPcapNg) {
+      // Parse pcapng format
+      packetInfo.push(`Format: pcapng (modern Wireshark format)`);
+      return parsePcapNg(bytes, packetInfo);
+    } else if (isPcap) {
+      packetInfo.push(`Format: pcap (classic format)`);
+      return parsePcapClassic(bytes, packetInfo, isPcapLE);
+    } else {
+      // Unknown format - provide what info we can
+      packetInfo.push(`Format: Unknown capture format`);
+      packetInfo.push(`\nNote: This file format is not recognized as standard pcap or pcapng.`);
+      packetInfo.push(`First bytes (hex): ${Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+      return packetInfo.join('\n');
+    }
+  } catch (error) {
+    console.error('Error parsing pcap:', error);
+    return `File: ${fileName}\nError parsing pcap file: ${error}\nThe file may be corrupted or in an unsupported format.`;
+  }
+}
+
+// Parse pcapng format (modern Wireshark default)
+function parsePcapNg(bytes: Uint8Array, packetInfo: string[]): string {
+  const protocols: Record<string, number> = {};
+  const ipAddresses: Set<string> = new Set();
+  const ports: Set<number> = new Set();
+  let packetCount = 0;
+  let totalBytes = 0;
+  let linkType = 1; // Default to Ethernet
+  
+  // Detect endianness from Section Header Block byte order magic at offset 8
+  const byteOrderMagic = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
+  const isLittleEndian = byteOrderMagic === 0x4d3c2b1a;
+  
+  console.log('pcapng byte order magic:', byteOrderMagic.toString(16), 'isLittleEndian:', isLittleEndian);
+  
+  const readUint32 = (offset: number): number => {
+    if (offset + 4 > bytes.length) return 0;
+    if (isLittleEndian) {
+      return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
+    }
+    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+  };
+  
+  const readUint16 = (offset: number): number => {
+    if (offset + 2 > bytes.length) return 0;
+    if (isLittleEndian) {
+      return bytes[offset] | (bytes[offset + 1] << 8);
+    }
+    return (bytes[offset] << 8) | bytes[offset + 1];
+  };
+  
+  let offset = 0;
+  const maxBlocks = 2000;
+  let blockCount = 0;
+  
+  while (offset + 8 <= bytes.length && blockCount < maxBlocks) {
+    const blockType = readUint32(offset);
+    const blockTotalLength = readUint32(offset + 4);
+    
+    if (blockTotalLength < 12 || blockTotalLength > bytes.length - offset) {
+      break;
+    }
+    
+    // Block types
+    if (blockType === 0x00000001) {
+      // Interface Description Block - get link type
+      linkType = readUint16(offset + 8);
+      console.log('Found IDB, linkType:', linkType);
+    } else if (blockType === 0x00000006 || blockType === 0x00000003) {
+      // Enhanced Packet Block (0x06) or Simple Packet Block (0x03)
+      packetCount++;
       
-      packetInfo.push(`Version: ${versionMajor}.${versionMinor}`);
-      packetInfo.push(`Snap Length: ${snapLen}`);
-      packetInfo.push(`Link Type: ${getLinkTypeName(linkType)}`);
+      let capturedLen: number;
+      let packetDataOffset: number;
       
-      // Parse packets
-      let offset = 24; // After global header
-      let packetCount = 0;
-      const protocols: Record<string, number> = {};
-      const ipAddresses: Set<string> = new Set();
-      const ports: Set<number> = new Set();
-      let totalBytes = 0;
+      if (blockType === 0x00000006) {
+        // Enhanced Packet Block
+        capturedLen = readUint32(offset + 20);
+        packetDataOffset = offset + 28;
+      } else {
+        // Simple Packet Block
+        capturedLen = readUint32(offset + 8);
+        packetDataOffset = offset + 16;
+      }
       
-      while (offset + 16 <= bytes.length && packetCount < 1000) {
-        const capturedLen = readUint32(offset + 8);
-        const originalLen = readUint32(offset + 12);
+      totalBytes += capturedLen;
+      
+      // Parse packet data
+      if (linkType === 1 && capturedLen >= 14 && packetDataOffset + capturedLen <= bytes.length) {
+        const etherType = (bytes[packetDataOffset + 12] << 8) | bytes[packetDataOffset + 13];
         
-        if (capturedLen === 0 || capturedLen > snapLen || offset + 16 + capturedLen > bytes.length) {
-          break;
-        }
-        
-        totalBytes += originalLen;
-        packetCount++;
-        
-        // Parse Ethernet frame (if link type is Ethernet)
-        if (linkType === 1 && capturedLen >= 14) {
-          const packetStart = offset + 16;
-          const etherType = (bytes[packetStart + 12] << 8) | bytes[packetStart + 13];
+        if (etherType === 0x0800) { // IPv4
+          protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
           
-          if (etherType === 0x0800) { // IPv4
-            protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
+          if (capturedLen >= 34) {
+            const ipProtocol = bytes[packetDataOffset + 23];
+            const srcIP = `${bytes[packetDataOffset + 26]}.${bytes[packetDataOffset + 27]}.${bytes[packetDataOffset + 28]}.${bytes[packetDataOffset + 29]}`;
+            const dstIP = `${bytes[packetDataOffset + 30]}.${bytes[packetDataOffset + 31]}.${bytes[packetDataOffset + 32]}.${bytes[packetDataOffset + 33]}`;
             
-            if (capturedLen >= 34) {
-              const ipProtocol = bytes[packetStart + 23];
-              const srcIP = `${bytes[packetStart + 26]}.${bytes[packetStart + 27]}.${bytes[packetStart + 28]}.${bytes[packetStart + 29]}`;
-              const dstIP = `${bytes[packetStart + 30]}.${bytes[packetStart + 31]}.${bytes[packetStart + 32]}.${bytes[packetStart + 33]}`;
-              
-              ipAddresses.add(srcIP);
-              ipAddresses.add(dstIP);
-              
-              if (ipProtocol === 6) { // TCP
-                protocols['TCP'] = (protocols['TCP'] || 0) + 1;
-                if (capturedLen >= 38) {
-                  const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
-                  const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
-                  ports.add(srcPort);
-                  ports.add(dstPort);
-                }
-              } else if (ipProtocol === 17) { // UDP
-                protocols['UDP'] = (protocols['UDP'] || 0) + 1;
-                if (capturedLen >= 38) {
-                  const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
-                  const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
-                  ports.add(srcPort);
-                  ports.add(dstPort);
-                }
-              } else if (ipProtocol === 1) { // ICMP
-                protocols['ICMP'] = (protocols['ICMP'] || 0) + 1;
+            ipAddresses.add(srcIP);
+            ipAddresses.add(dstIP);
+            
+            if (ipProtocol === 6) { // TCP
+              protocols['TCP'] = (protocols['TCP'] || 0) + 1;
+              if (capturedLen >= 38) {
+                const srcPort = (bytes[packetDataOffset + 34] << 8) | bytes[packetDataOffset + 35];
+                const dstPort = (bytes[packetDataOffset + 36] << 8) | bytes[packetDataOffset + 37];
+                ports.add(srcPort);
+                ports.add(dstPort);
               }
+            } else if (ipProtocol === 17) { // UDP
+              protocols['UDP'] = (protocols['UDP'] || 0) + 1;
+              if (capturedLen >= 38) {
+                const srcPort = (bytes[packetDataOffset + 34] << 8) | bytes[packetDataOffset + 35];
+                const dstPort = (bytes[packetDataOffset + 36] << 8) | bytes[packetDataOffset + 37];
+                ports.add(srcPort);
+                ports.add(dstPort);
+              }
+            } else if (ipProtocol === 1) {
+              protocols['ICMP'] = (protocols['ICMP'] || 0) + 1;
             }
-          } else if (etherType === 0x0806) { // ARP
-            protocols['ARP'] = (protocols['ARP'] || 0) + 1;
-          } else if (etherType === 0x86dd) { // IPv6
-            protocols['IPv6'] = (protocols['IPv6'] || 0) + 1;
+          }
+        } else if (etherType === 0x0806) {
+          protocols['ARP'] = (protocols['ARP'] || 0) + 1;
+        } else if (etherType === 0x86dd) {
+          protocols['IPv6'] = (protocols['IPv6'] || 0) + 1;
+        }
+      } else if (linkType === 101) {
+        // Raw IP (no Ethernet header)
+        protocols['Raw IP'] = (protocols['Raw IP'] || 0) + 1;
+        if (capturedLen >= 20) {
+          const ipVersion = (bytes[packetDataOffset] >> 4) & 0x0f;
+          if (ipVersion === 4) {
+            protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
+            const ipProtocol = bytes[packetDataOffset + 9];
+            const srcIP = `${bytes[packetDataOffset + 12]}.${bytes[packetDataOffset + 13]}.${bytes[packetDataOffset + 14]}.${bytes[packetDataOffset + 15]}`;
+            const dstIP = `${bytes[packetDataOffset + 16]}.${bytes[packetDataOffset + 17]}.${bytes[packetDataOffset + 18]}.${bytes[packetDataOffset + 19]}`;
+            ipAddresses.add(srcIP);
+            ipAddresses.add(dstIP);
+            
+            const ihl = (bytes[packetDataOffset] & 0x0f) * 4;
+            if (ipProtocol === 6 && capturedLen >= ihl + 4) {
+              protocols['TCP'] = (protocols['TCP'] || 0) + 1;
+              const srcPort = (bytes[packetDataOffset + ihl] << 8) | bytes[packetDataOffset + ihl + 1];
+              const dstPort = (bytes[packetDataOffset + ihl + 2] << 8) | bytes[packetDataOffset + ihl + 3];
+              ports.add(srcPort);
+              ports.add(dstPort);
+            } else if (ipProtocol === 17 && capturedLen >= ihl + 4) {
+              protocols['UDP'] = (protocols['UDP'] || 0) + 1;
+              const srcPort = (bytes[packetDataOffset + ihl] << 8) | bytes[packetDataOffset + ihl + 1];
+              const dstPort = (bytes[packetDataOffset + ihl + 2] << 8) | bytes[packetDataOffset + ihl + 3];
+              ports.add(srcPort);
+              ports.add(dstPort);
+            }
           }
         }
-        
-        offset += 16 + capturedLen;
-      }
-      
-      packetInfo.push(`\n--- Packet Summary ---`);
-      packetInfo.push(`Total Packets: ${packetCount}`);
-      packetInfo.push(`Total Data: ${(totalBytes / 1024).toFixed(2)} KB`);
-      
-      if (Object.keys(protocols).length > 0) {
-        packetInfo.push(`\n--- Protocol Distribution ---`);
-        for (const [proto, count] of Object.entries(protocols).sort((a, b) => b[1] - a[1])) {
-          packetInfo.push(`${proto}: ${count} packets (${((count / packetCount) * 100).toFixed(1)}%)`);
-        }
-      }
-      
-      if (ipAddresses.size > 0) {
-        const ipList = Array.from(ipAddresses).slice(0, 20);
-        packetInfo.push(`\n--- IP Addresses Observed (${ipAddresses.size} unique) ---`);
-        packetInfo.push(ipList.join(', '));
-        if (ipAddresses.size > 20) {
-          packetInfo.push(`... and ${ipAddresses.size - 20} more`);
-        }
-      }
-      
-      if (ports.size > 0) {
-        const portList = Array.from(ports).sort((a, b) => a - b).slice(0, 30);
-        packetInfo.push(`\n--- Ports Used (${ports.size} unique) ---`);
-        packetInfo.push(portList.map(p => `${p} (${getServiceName(p)})`).join(', '));
-      }
-      
-      // Identify potential security concerns
-      const securityNotes: string[] = [];
-      
-      if (ports.has(23)) securityNotes.push('Telnet (port 23) detected - unencrypted protocol');
-      if (ports.has(21)) securityNotes.push('FTP (port 21) detected - credentials may be exposed');
-      if (ports.has(25)) securityNotes.push('SMTP (port 25) detected - email traffic');
-      if (ports.has(3389)) securityNotes.push('RDP (port 3389) detected - remote desktop access');
-      if (ports.has(22)) securityNotes.push('SSH (port 22) detected - encrypted remote access');
-      if (ports.has(443)) securityNotes.push('HTTPS (port 443) detected - encrypted web traffic');
-      if (ports.has(80)) securityNotes.push('HTTP (port 80) detected - unencrypted web traffic');
-      if (ports.has(53)) securityNotes.push('DNS (port 53) detected - name resolution traffic');
-      
-      if (securityNotes.length > 0) {
-        packetInfo.push(`\n--- Notable Services/Protocols ---`);
-        securityNotes.forEach(note => packetInfo.push(`• ${note}`));
       }
     }
     
-    return packetInfo.join('\n');
-  } catch (error) {
-    console.error('Error parsing pcap:', error);
-    return `File: ${fileName}\nError parsing pcap file. The file may be corrupted or in an unsupported format.\nAttempting analysis based on file metadata.`;
+    offset += blockTotalLength;
+    blockCount++;
   }
+  
+  packetInfo.push(`Link Type: ${getLinkTypeName(linkType)}`);
+  packetInfo.push(`\n--- Packet Summary ---`);
+  packetInfo.push(`Total Packets: ${packetCount}`);
+  packetInfo.push(`Total Data: ${(totalBytes / 1024).toFixed(2)} KB`);
+  
+  if (Object.keys(protocols).length > 0) {
+    packetInfo.push(`\n--- Protocol Distribution ---`);
+    for (const [proto, count] of Object.entries(protocols).sort((a, b) => b[1] - a[1])) {
+      const percentage = packetCount > 0 ? ((count / packetCount) * 100).toFixed(1) : '0';
+      packetInfo.push(`${proto}: ${count} packets (${percentage}%)`);
+    }
+  }
+  
+  if (ipAddresses.size > 0) {
+    const ipList = Array.from(ipAddresses).slice(0, 20);
+    packetInfo.push(`\n--- IP Addresses Observed (${ipAddresses.size} unique) ---`);
+    packetInfo.push(ipList.join(', '));
+    if (ipAddresses.size > 20) {
+      packetInfo.push(`... and ${ipAddresses.size - 20} more`);
+    }
+  }
+  
+  if (ports.size > 0) {
+    const portList = Array.from(ports).sort((a, b) => a - b).slice(0, 30);
+    packetInfo.push(`\n--- Ports Used (${ports.size} unique) ---`);
+    packetInfo.push(portList.map(p => `${p} (${getServiceName(p)})`).join(', '));
+  }
+  
+  // Security observations
+  const securityNotes: string[] = [];
+  if (ports.has(23)) securityNotes.push('Telnet (port 23) detected - unencrypted protocol');
+  if (ports.has(21)) securityNotes.push('FTP (port 21) detected - credentials may be exposed');
+  if (ports.has(25)) securityNotes.push('SMTP (port 25) detected - email traffic');
+  if (ports.has(3389)) securityNotes.push('RDP (port 3389) detected - remote desktop access');
+  if (ports.has(22)) securityNotes.push('SSH (port 22) detected - encrypted remote access');
+  if (ports.has(443)) securityNotes.push('HTTPS (port 443) detected - encrypted web traffic');
+  if (ports.has(80)) securityNotes.push('HTTP (port 80) detected - unencrypted web traffic');
+  if (ports.has(53)) securityNotes.push('DNS (port 53) detected - name resolution traffic');
+  
+  if (securityNotes.length > 0) {
+    packetInfo.push(`\n--- Notable Services/Protocols ---`);
+    securityNotes.forEach(note => packetInfo.push(`• ${note}`));
+  }
+  
+  return packetInfo.join('\n');
+}
+
+// Parse classic pcap format
+function parsePcapClassic(bytes: Uint8Array, packetInfo: string[], isLittleEndian: boolean): string {
+  const readUint16 = (offset: number): number => {
+    if (isLittleEndian) {
+      return bytes[offset] | (bytes[offset + 1] << 8);
+    }
+    return (bytes[offset] << 8) | bytes[offset + 1];
+  };
+  
+  const readUint32 = (offset: number): number => {
+    if (isLittleEndian) {
+      return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
+    }
+    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+  };
+  
+  const versionMajor = readUint16(4);
+  const versionMinor = readUint16(6);
+  const snapLen = readUint32(16);
+  const linkType = readUint32(20);
+  
+  packetInfo.push(`Version: ${versionMajor}.${versionMinor}`);
+  packetInfo.push(`Snap Length: ${snapLen}`);
+  packetInfo.push(`Link Type: ${getLinkTypeName(linkType)}`);
+  
+  // Parse packets
+  let offset = 24;
+  let packetCount = 0;
+  const protocols: Record<string, number> = {};
+  const ipAddresses: Set<string> = new Set();
+  const ports: Set<number> = new Set();
+  let totalBytes = 0;
+  
+  while (offset + 16 <= bytes.length && packetCount < 2000) {
+    const capturedLen = readUint32(offset + 8);
+    const originalLen = readUint32(offset + 12);
+    
+    if (capturedLen === 0 || capturedLen > snapLen || offset + 16 + capturedLen > bytes.length) {
+      break;
+    }
+    
+    totalBytes += originalLen;
+    packetCount++;
+    
+    // Parse Ethernet frame
+    if (linkType === 1 && capturedLen >= 14) {
+      const packetStart = offset + 16;
+      const etherType = (bytes[packetStart + 12] << 8) | bytes[packetStart + 13];
+      
+      if (etherType === 0x0800) { // IPv4
+        protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
+        
+        if (capturedLen >= 34) {
+          const ipProtocol = bytes[packetStart + 23];
+          const srcIP = `${bytes[packetStart + 26]}.${bytes[packetStart + 27]}.${bytes[packetStart + 28]}.${bytes[packetStart + 29]}`;
+          const dstIP = `${bytes[packetStart + 30]}.${bytes[packetStart + 31]}.${bytes[packetStart + 32]}.${bytes[packetStart + 33]}`;
+          
+          ipAddresses.add(srcIP);
+          ipAddresses.add(dstIP);
+          
+          if (ipProtocol === 6) { // TCP
+            protocols['TCP'] = (protocols['TCP'] || 0) + 1;
+            if (capturedLen >= 38) {
+              const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
+              const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
+              ports.add(srcPort);
+              ports.add(dstPort);
+            }
+          } else if (ipProtocol === 17) { // UDP
+            protocols['UDP'] = (protocols['UDP'] || 0) + 1;
+            if (capturedLen >= 38) {
+              const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
+              const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
+              ports.add(srcPort);
+              ports.add(dstPort);
+            }
+          } else if (ipProtocol === 1) {
+            protocols['ICMP'] = (protocols['ICMP'] || 0) + 1;
+          }
+        }
+      } else if (etherType === 0x0806) {
+        protocols['ARP'] = (protocols['ARP'] || 0) + 1;
+      } else if (etherType === 0x86dd) {
+        protocols['IPv6'] = (protocols['IPv6'] || 0) + 1;
+      }
+    } else if (linkType === 101) {
+      // Raw IP
+      protocols['Raw IP'] = (protocols['Raw IP'] || 0) + 1;
+    }
+    
+    offset += 16 + capturedLen;
+  }
+  
+  packetInfo.push(`\n--- Packet Summary ---`);
+  packetInfo.push(`Total Packets: ${packetCount}`);
+  packetInfo.push(`Total Data: ${(totalBytes / 1024).toFixed(2)} KB`);
+  
+  if (Object.keys(protocols).length > 0) {
+    packetInfo.push(`\n--- Protocol Distribution ---`);
+    for (const [proto, count] of Object.entries(protocols).sort((a, b) => b[1] - a[1])) {
+      packetInfo.push(`${proto}: ${count} packets (${((count / packetCount) * 100).toFixed(1)}%)`);
+    }
+  }
+  
+  if (ipAddresses.size > 0) {
+    const ipList = Array.from(ipAddresses).slice(0, 20);
+    packetInfo.push(`\n--- IP Addresses Observed (${ipAddresses.size} unique) ---`);
+    packetInfo.push(ipList.join(', '));
+    if (ipAddresses.size > 20) {
+      packetInfo.push(`... and ${ipAddresses.size - 20} more`);
+    }
+  }
+  
+  if (ports.size > 0) {
+    const portList = Array.from(ports).sort((a, b) => a - b).slice(0, 30);
+    packetInfo.push(`\n--- Ports Used (${ports.size} unique) ---`);
+    packetInfo.push(portList.map(p => `${p} (${getServiceName(p)})`).join(', '));
+  }
+  
+  // Security observations
+  const securityNotes: string[] = [];
+  if (ports.has(23)) securityNotes.push('Telnet (port 23) detected - unencrypted protocol');
+  if (ports.has(21)) securityNotes.push('FTP (port 21) detected - credentials may be exposed');
+  if (ports.has(25)) securityNotes.push('SMTP (port 25) detected - email traffic');
+  if (ports.has(3389)) securityNotes.push('RDP (port 3389) detected - remote desktop access');
+  if (ports.has(22)) securityNotes.push('SSH (port 22) detected - encrypted remote access');
+  if (ports.has(443)) securityNotes.push('HTTPS (port 443) detected - encrypted web traffic');
+  if (ports.has(80)) securityNotes.push('HTTP (port 80) detected - unencrypted web traffic');
+  if (ports.has(53)) securityNotes.push('DNS (port 53) detected - name resolution traffic');
+  
+  if (securityNotes.length > 0) {
+    packetInfo.push(`\n--- Notable Services/Protocols ---`);
+    securityNotes.forEach(note => packetInfo.push(`• ${note}`));
+  }
+  
+  return packetInfo.join('\n');
 }
 
 function getLinkTypeName(linkType: number): string {
