@@ -244,38 +244,50 @@ serve(async (req) => {
       networkData = `Network capture file: ${fileName}, Size: ${(fileSize / 1024).toFixed(1)} KB`;
     }
 
-    const systemPrompt = `You are a cybersecurity expert who translates technical network data into simple, executive-level insights for small and medium business enterprise owners. 
+    const systemPrompt = `ROLE:
+You are a senior cybersecurity analyst with expertise in network forensics and intrusion detection. You translate technical findings into clear, executive-level insights for small and medium business enterprise owners.
 
+TASK:
+Analyze the provided structured network traffic data extracted from a Wireshark capture.
+
+OBJECTIVES:
+- Identify suspicious or anomalous traffic patterns.
+- Classify potential attack types (e.g., scanning, DoS, malware, C2, data exfiltration).
+- Highlight affected IPs, ports, and protocols.
+- Assess severity and confidence level.
+- Recommend follow-up investigation steps or mitigations.
+
+OUTPUT REQUIREMENTS:
 Your responses must be:
-- Written in plain English with NO technical jargon
+- Written in plain English with NO technical jargon for the business owner
 - Focused on business impact, not technical details
 - Actionable and reassuring
-
-You are analyzing REAL network capture data that has been parsed from a pcap file. Use the actual data provided to give accurate and specific insights.
+- Include confidence levels in your assessments
 
 THREAT ANALYSIS INSTRUCTIONS:
-Analyze the uploaded Wireshark .pcap data and extract potential cybersecurity threats. For each identified threat, determine:
+For each identified threat, determine:
 - Likelihood (1-5): Based on the frequency of suspicious events in the capture (e.g., repeated failed logins, port scans, unusual traffic volume)
 - Impact (1-5): Based on security context (e.g., malware potential, data exfiltration risk, protocol abuse)
 - Severity: "low" (green zone), "medium" (yellow/orange zone), or "high" (red zone)
+- Confidence Level: Express how confident you are in each finding (Low/Medium/High)
 
 You must respond with a valid JSON object containing exactly these seven fields:
 {
-  "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data",
-  "whyItMatters": "The business impact and why the business owner should care",
+  "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data. Include your confidence level.",
+  "whyItMatters": "The business impact and why the business owner should care. Be specific about potential consequences.",
   "riskLevel": 1 to 5 (integer, where 1 is lowest risk and 5 is highest risk),
-  "riskDescription": "A detailed 2-3 sentence explanation of what this risk level means for the business, why it was assigned this score based on the actual network data, and the potential impact if not addressed",
-  "actionToTake": "One clear, simple action step based on what was found",
-  "cybersecurityNews": "2-3 interesting and relevant cybersecurity insights, tips, or recent trends that relate to the protocols, services, or patterns found in this specific capture. Make it educational and valuable for SMB owners. Include practical awareness points they should know about.",
+  "riskDescription": "A detailed 2-3 sentence explanation including: what this risk level means for the business, why it was assigned this score based on the actual network data, your confidence in this assessment, and the potential impact if not addressed",
+  "actionToTake": "Clear, prioritized action steps based on severity. Include recommended follow-up investigation steps or mitigations.",
+  "cybersecurityNews": "2-3 relevant cybersecurity insights that relate to the specific attack types, protocols, or patterns found in this capture. Include practical awareness points and recent trends SMB owners should know about.",
   "threatMap": [
     {
-      "threatType": "Name of the threat (e.g., 'Unencrypted HTTP Traffic', 'Suspicious Port Scan', 'Telnet Access Detected')",
+      "threatType": "Name of the threat with classification (e.g., 'Port Scan - Reconnaissance', 'Suspicious DNS - Potential C2')",
       "sourceIP": "Source IP address or 'Multiple' if from various sources",
       "frequency": number of occurrences detected,
       "likelihood": 1-5 based on how likely this is to be exploited,
       "impact": 1-5 based on potential damage if exploited,
       "severity": "low" | "medium" | "high",
-      "explanation": "Brief explanation of why this threat falls in its position on the heat map based on the actual traffic patterns observed"
+      "explanation": "Brief explanation including: why this threat falls in its position on the heat map, the confidence level of this detection, and what specific traffic patterns led to this classification"
     }
   ]
 }
@@ -288,22 +300,27 @@ Threat Map Guidelines:
 - Severity is determined by the combination: Low (L+I ≤ 4), Medium (L+I 5-7), High (L+I ≥ 8)
 
 Risk Level Guidelines:
-- 1: Minimal risk - Normal network activity, no concerns detected in the data
-- 2: Low risk - Minor observations that warrant awareness but no immediate action
-- 3: Moderate risk - Some concerning patterns that should be investigated (e.g., unencrypted protocols, unusual ports)
-- 4: High risk - Significant security concerns requiring prompt attention (e.g., suspicious connections, dangerous services)
-- 5: Critical risk - Immediate action required to protect the business (e.g., known malicious patterns, active threats)
-
-Base your risk assessment on the ACTUAL protocols, ports, and IP addresses found in the data.
-For the cybersecurity news section, provide insights specific to the types of traffic observed (e.g., if HTTP is detected, discuss risks of unencrypted web traffic; if DNS is present, mention DNS security best practices).
+- 1: Minimal risk - Normal network activity, no concerns detected. High confidence in safe assessment.
+- 2: Low risk - Minor observations that warrant awareness but no immediate action.
+- 3: Moderate risk - Some concerning patterns requiring investigation (e.g., unencrypted protocols, unusual ports).
+- 4: High risk - Significant security concerns requiring prompt attention (e.g., suspicious connections, dangerous services).
+- 5: Critical risk - Immediate action required (e.g., active threats, known malicious patterns, data exfiltration indicators).
 
 Always respond with ONLY the JSON object, no additional text.`;
 
-    const userPrompt = `Analyze this network capture data and provide detailed cybersecurity insights for a small and medium business enterprise owner:
-
+    const userPrompt = `STRUCTURED NETWORK TRAFFIC DATA:
 ${networkData}
 
-Remember: Base your analysis on the actual data shown above. Respond with ONLY a JSON object containing whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, and threatMap (array of detected threats for the heat map visualization).`;
+ANALYSIS REQUEST:
+Analyze the above network capture data extracted from a Wireshark PCAP file. As a senior cybersecurity analyst:
+
+1. Identify all suspicious or anomalous traffic patterns
+2. Classify any potential attack types (scanning, DoS, malware, C2, data exfiltration, etc.)
+3. Highlight affected IPs, ports, and protocols
+4. Assess severity with confidence levels
+5. Provide recommended follow-up investigation steps or mitigations
+
+Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, and threatMap.`;
 
     console.log('Calling Lovable AI Gateway with parsed pcap data');
 
