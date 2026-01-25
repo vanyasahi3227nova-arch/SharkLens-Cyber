@@ -78,31 +78,33 @@ export const StepGuide = ({ currentStep }: StepGuideProps) => {
               Step {step.number}
             </div>
 
-            <div className="mt-3 flex items-start gap-4">
+            <div className={`mt-3 flex items-start gap-4 ${!step.details ? 'min-h-[120px]' : ''}`}>
               <div
-                className={`p-3 rounded-lg ${
+                className={`p-3 rounded-lg shrink-0 ${
                   isActive
                     ? "bg-primary/20"
                     : isCompleted
                     ? "bg-primary/10"
                     : "bg-secondary"
-                }`}
+                } ${!step.details ? 'p-4' : ''}`}
               >
                 <Icon
-                  className={`w-6 h-6 ${
+                  className={`${!step.details ? 'w-8 h-8' : 'w-6 h-6'} ${
                     isActive || isCompleted ? "text-primary" : "text-muted-foreground"
                   }`}
                 />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 flex flex-col justify-center">
                 <h3
-                  className={`font-semibold mb-1 ${
+                  className={`font-semibold mb-2 ${
                     isActive ? "text-foreground" : "text-foreground/80"
-                  }`}
+                  } ${!step.details ? 'text-lg' : ''}`}
                 >
                   {step.title}
                 </h3>
-                <p className="text-sm text-muted-foreground">{step.description}</p>
+                <p className={`text-muted-foreground ${!step.details ? 'text-base leading-relaxed' : 'text-sm'}`}>
+                  {step.description}
+                </p>
               </div>
             </div>
 
