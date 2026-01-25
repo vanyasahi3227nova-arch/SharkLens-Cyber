@@ -1,7 +1,5 @@
 import { FileText, Upload, BarChart3 } from "lucide-react";
 import wiresharkExportGuide from "@/assets/wireshark-export-guide.png";
-import stepUploadIllustration from "@/assets/step-upload-illustration.png";
-import stepAnalysisIllustration from "@/assets/step-analysis-illustration.png";
 
 interface StepGuideProps {
   currentStep: number;
@@ -38,30 +36,14 @@ export const StepGuide = ({ currentStep }: StepGuideProps) => {
       title: "Upload Your File",
       description: "Upload the exported .txt or .json file for AI-powered analysis",
       icon: Upload,
-      details: (
-        <div className="mt-4 rounded-lg overflow-hidden border border-border/50">
-          <img 
-            src={stepUploadIllustration} 
-            alt="Upload your network data file" 
-            className="w-full h-auto opacity-90"
-          />
-        </div>
-      ),
+      details: null,
     },
     {
       number: 3,
       title: "View Your Analysis",
       description: "Get actionable cybersecurity insights in plain English",
       icon: BarChart3,
-      details: (
-        <div className="mt-4 rounded-lg overflow-hidden border border-border/50">
-          <img 
-            src={stepAnalysisIllustration} 
-            alt="View security analysis dashboard" 
-            className="w-full h-auto opacity-90"
-          />
-        </div>
-      ),
+      details: null,
     },
   ];
 
@@ -124,7 +106,7 @@ export const StepGuide = ({ currentStep }: StepGuideProps) => {
               </div>
             </div>
 
-            {/* Show details/images for active step */}
+            {/* Expanded details for step 1 when active */}
             {step.details && isActive && step.details}
           </div>
         );
