@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Waves, Shield, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/Header";
@@ -6,6 +6,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { AnalysisResults } from "@/components/AnalysisResults";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
+import { StepGuide } from "@/components/StepGuide";
 import { supabase } from "@/integrations/supabase/client";
 
 interface ThreatData {
@@ -35,6 +36,13 @@ const Index = () => {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Determine current step based on state
+  const currentStep = useMemo(() => {
+    if (result) return 3;
+    if (selectedFile) return 2;
+    return 1;
+  }, [selectedFile, result]);
+
   const handleAnalyze = async () => {
     if (!selectedFile) return;
 
@@ -43,17 +51,15 @@ const Index = () => {
     setResult(null);
 
     try {
-      // Read the actual file content as base64
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const base64Content = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      // Read the file content as text (for .txt and .json files)
+      const fileContent = await selectedFile.text();
       
       const { data, error: fnError } = await supabase.functions.invoke('analyze-network', {
         body: { 
           fileName: selectedFile.name,
           fileSize: selectedFile.size,
-          fileContent: base64Content
+          fileContent: fileContent,
+          fileType: selectedFile.name.endsWith('.json') ? 'json' : 'text'
         },
       });
 
@@ -135,10 +141,13 @@ const Index = () => {
           ))}
         </section>
 
+        {/* Step Guide */}
+        <StepGuide currentStep={currentStep} />
+
         {/* Upload Section */}
         <section className="bg-card rounded-2xl shadow-card p-8 mb-8 animate-scale-in">
           <h3 className="text-lg font-semibold text-foreground mb-6">
-            Step 1: Upload Your Network Capture
+            Upload Your Exported Network Data
           </h3>
           <FileUpload onFileSelect={setSelectedFile} selectedFile={selectedFile} />
           

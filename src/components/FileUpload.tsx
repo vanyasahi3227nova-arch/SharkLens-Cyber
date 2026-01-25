@@ -21,7 +21,7 @@ export const FileUpload = ({ onFileSelect, selectedFile }: FileUploadProps) => {
   }, []);
 
   const validateFile = (file: File): boolean => {
-    const validExtensions = [".pcap", ".pcapng"];
+    const validExtensions = [".txt", ".json"];
     const fileName = file.name.toLowerCase();
     return validExtensions.some((ext) => fileName.endsWith(ext));
   };
@@ -93,10 +93,10 @@ export const FileUpload = ({ onFileSelect, selectedFile }: FileUploadProps) => {
     >
       <input
         type="file"
-        accept=".pcap,.pcapng"
+        accept=".txt,.json"
         onChange={handleFileInput}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-        aria-label="Upload network capture file"
+        aria-label="Upload exported network data file"
       />
       <div className="flex flex-col items-center gap-4">
         <div className={cn(
@@ -110,13 +110,13 @@ export const FileUpload = ({ onFileSelect, selectedFile }: FileUploadProps) => {
         </div>
         <div>
           <p className="font-medium text-foreground mb-1">
-            {isDragging ? "Drop your file here" : "Drag & drop your network capture"}
+            {isDragging ? "Drop your file here" : "Drag & drop your exported network data"}
           </p>
           <p className="text-sm text-muted-foreground">
             or <span className="text-primary font-medium">browse</span> to select a file
           </p>
           <p className="text-xs text-muted-foreground mt-2">
-            Supports .pcap and .pcapng files
+            Supports .txt and .json files exported from Wireshark
           </p>
         </div>
       </div>

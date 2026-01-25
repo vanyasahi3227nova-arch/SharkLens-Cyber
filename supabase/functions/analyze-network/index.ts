@@ -8,425 +8,6 @@ const corsHeaders = {
 
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 
-// Parse pcap file binary data to extract packet information
-function parsePcapFile(base64Content: string, fileName: string): string {
-  try {
-    // Decode base64 to binary
-    const binaryString = atob(base64Content);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    
-    console.log('File bytes (first 20):', Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    
-    // Check for pcap magic number (0xa1b2c3d4 or 0xd4c3b2a1 for swapped)
-    const magicNumber = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
-    const magicNumberLE = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
-    
-    const isPcapBE = magicNumber === 0xa1b2c3d4;
-    const isPcapLE = magicNumber === 0xd4c3b2a1;
-    const isPcap = isPcapBE || isPcapLE;
-    
-    // pcapng Section Header Block magic (0x0A0D0D0A) - same in both endianness
-    const isPcapNg = magicNumber === 0x0a0d0d0a || magicNumberLE === 0x0a0d0d0a;
-    
-    console.log('Format detection - isPcap:', isPcap, 'isPcapNg:', isPcapNg, 'magic:', magicNumber.toString(16));
-    
-    let packetInfo: string[] = [];
-    packetInfo.push(`File: ${fileName}`);
-    packetInfo.push(`File Size: ${bytes.length} bytes`);
-    
-    if (isPcapNg) {
-      // Parse pcapng format
-      packetInfo.push(`Format: pcapng (modern Wireshark format)`);
-      return parsePcapNg(bytes, packetInfo);
-    } else if (isPcap) {
-      packetInfo.push(`Format: pcap (classic format)`);
-      return parsePcapClassic(bytes, packetInfo, isPcapLE);
-    } else {
-      // Unknown format - provide what info we can
-      packetInfo.push(`Format: Unknown capture format`);
-      packetInfo.push(`\nNote: This file format is not recognized as standard pcap or pcapng.`);
-      packetInfo.push(`First bytes (hex): ${Array.from(bytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-      return packetInfo.join('\n');
-    }
-  } catch (error) {
-    console.error('Error parsing pcap:', error);
-    return `File: ${fileName}\nError parsing pcap file: ${error}\nThe file may be corrupted or in an unsupported format.`;
-  }
-}
-
-// Parse pcapng format (modern Wireshark default)
-function parsePcapNg(bytes: Uint8Array, packetInfo: string[]): string {
-  const protocols: Record<string, number> = {};
-  const ipAddresses: Set<string> = new Set();
-  const ports: Set<number> = new Set();
-  let packetCount = 0;
-  let totalBytes = 0;
-  let linkType = 1; // Default to Ethernet
-  
-  // Detect endianness from Section Header Block byte order magic at offset 8
-  const byteOrderMagic = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
-  const isLittleEndian = byteOrderMagic === 0x4d3c2b1a;
-  
-  console.log('pcapng byte order magic:', byteOrderMagic.toString(16), 'isLittleEndian:', isLittleEndian);
-  
-  const readUint32 = (offset: number): number => {
-    if (offset + 4 > bytes.length) return 0;
-    if (isLittleEndian) {
-      return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
-    }
-    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
-  };
-  
-  const readUint16 = (offset: number): number => {
-    if (offset + 2 > bytes.length) return 0;
-    if (isLittleEndian) {
-      return bytes[offset] | (bytes[offset + 1] << 8);
-    }
-    return (bytes[offset] << 8) | bytes[offset + 1];
-  };
-  
-  let offset = 0;
-  const maxBlocks = 2000;
-  let blockCount = 0;
-  
-  while (offset + 8 <= bytes.length && blockCount < maxBlocks) {
-    const blockType = readUint32(offset);
-    const blockTotalLength = readUint32(offset + 4);
-    
-    if (blockTotalLength < 12 || blockTotalLength > bytes.length - offset) {
-      break;
-    }
-    
-    // Block types
-    if (blockType === 0x00000001) {
-      // Interface Description Block - get link type
-      linkType = readUint16(offset + 8);
-      console.log('Found IDB, linkType:', linkType);
-    } else if (blockType === 0x00000006 || blockType === 0x00000003) {
-      // Enhanced Packet Block (0x06) or Simple Packet Block (0x03)
-      packetCount++;
-      
-      let capturedLen: number;
-      let packetDataOffset: number;
-      
-      if (blockType === 0x00000006) {
-        // Enhanced Packet Block
-        capturedLen = readUint32(offset + 20);
-        packetDataOffset = offset + 28;
-      } else {
-        // Simple Packet Block
-        capturedLen = readUint32(offset + 8);
-        packetDataOffset = offset + 16;
-      }
-      
-      totalBytes += capturedLen;
-      
-      // Parse packet data
-      if (linkType === 1 && capturedLen >= 14 && packetDataOffset + capturedLen <= bytes.length) {
-        const etherType = (bytes[packetDataOffset + 12] << 8) | bytes[packetDataOffset + 13];
-        
-        if (etherType === 0x0800) { // IPv4
-          protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
-          
-          if (capturedLen >= 34) {
-            const ipProtocol = bytes[packetDataOffset + 23];
-            const srcIP = `${bytes[packetDataOffset + 26]}.${bytes[packetDataOffset + 27]}.${bytes[packetDataOffset + 28]}.${bytes[packetDataOffset + 29]}`;
-            const dstIP = `${bytes[packetDataOffset + 30]}.${bytes[packetDataOffset + 31]}.${bytes[packetDataOffset + 32]}.${bytes[packetDataOffset + 33]}`;
-            
-            ipAddresses.add(srcIP);
-            ipAddresses.add(dstIP);
-            
-            if (ipProtocol === 6) { // TCP
-              protocols['TCP'] = (protocols['TCP'] || 0) + 1;
-              if (capturedLen >= 38) {
-                const srcPort = (bytes[packetDataOffset + 34] << 8) | bytes[packetDataOffset + 35];
-                const dstPort = (bytes[packetDataOffset + 36] << 8) | bytes[packetDataOffset + 37];
-                ports.add(srcPort);
-                ports.add(dstPort);
-              }
-            } else if (ipProtocol === 17) { // UDP
-              protocols['UDP'] = (protocols['UDP'] || 0) + 1;
-              if (capturedLen >= 38) {
-                const srcPort = (bytes[packetDataOffset + 34] << 8) | bytes[packetDataOffset + 35];
-                const dstPort = (bytes[packetDataOffset + 36] << 8) | bytes[packetDataOffset + 37];
-                ports.add(srcPort);
-                ports.add(dstPort);
-              }
-            } else if (ipProtocol === 1) {
-              protocols['ICMP'] = (protocols['ICMP'] || 0) + 1;
-            }
-          }
-        } else if (etherType === 0x0806) {
-          protocols['ARP'] = (protocols['ARP'] || 0) + 1;
-        } else if (etherType === 0x86dd) {
-          protocols['IPv6'] = (protocols['IPv6'] || 0) + 1;
-        }
-      } else if (linkType === 101) {
-        // Raw IP (no Ethernet header)
-        protocols['Raw IP'] = (protocols['Raw IP'] || 0) + 1;
-        if (capturedLen >= 20) {
-          const ipVersion = (bytes[packetDataOffset] >> 4) & 0x0f;
-          if (ipVersion === 4) {
-            protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
-            const ipProtocol = bytes[packetDataOffset + 9];
-            const srcIP = `${bytes[packetDataOffset + 12]}.${bytes[packetDataOffset + 13]}.${bytes[packetDataOffset + 14]}.${bytes[packetDataOffset + 15]}`;
-            const dstIP = `${bytes[packetDataOffset + 16]}.${bytes[packetDataOffset + 17]}.${bytes[packetDataOffset + 18]}.${bytes[packetDataOffset + 19]}`;
-            ipAddresses.add(srcIP);
-            ipAddresses.add(dstIP);
-            
-            const ihl = (bytes[packetDataOffset] & 0x0f) * 4;
-            if (ipProtocol === 6 && capturedLen >= ihl + 4) {
-              protocols['TCP'] = (protocols['TCP'] || 0) + 1;
-              const srcPort = (bytes[packetDataOffset + ihl] << 8) | bytes[packetDataOffset + ihl + 1];
-              const dstPort = (bytes[packetDataOffset + ihl + 2] << 8) | bytes[packetDataOffset + ihl + 3];
-              ports.add(srcPort);
-              ports.add(dstPort);
-            } else if (ipProtocol === 17 && capturedLen >= ihl + 4) {
-              protocols['UDP'] = (protocols['UDP'] || 0) + 1;
-              const srcPort = (bytes[packetDataOffset + ihl] << 8) | bytes[packetDataOffset + ihl + 1];
-              const dstPort = (bytes[packetDataOffset + ihl + 2] << 8) | bytes[packetDataOffset + ihl + 3];
-              ports.add(srcPort);
-              ports.add(dstPort);
-            }
-          }
-        }
-      }
-    }
-    
-    offset += blockTotalLength;
-    blockCount++;
-  }
-  
-  packetInfo.push(`Link Type: ${getLinkTypeName(linkType)}`);
-  packetInfo.push(`\n--- Packet Summary ---`);
-  packetInfo.push(`Total Packets: ${packetCount}`);
-  packetInfo.push(`Total Data: ${(totalBytes / 1024).toFixed(2)} KB`);
-  
-  if (Object.keys(protocols).length > 0) {
-    packetInfo.push(`\n--- Protocol Distribution ---`);
-    for (const [proto, count] of Object.entries(protocols).sort((a, b) => b[1] - a[1])) {
-      const percentage = packetCount > 0 ? ((count / packetCount) * 100).toFixed(1) : '0';
-      packetInfo.push(`${proto}: ${count} packets (${percentage}%)`);
-    }
-  }
-  
-  if (ipAddresses.size > 0) {
-    const ipList = Array.from(ipAddresses).slice(0, 20);
-    packetInfo.push(`\n--- IP Addresses Observed (${ipAddresses.size} unique) ---`);
-    packetInfo.push(ipList.join(', '));
-    if (ipAddresses.size > 20) {
-      packetInfo.push(`... and ${ipAddresses.size - 20} more`);
-    }
-  }
-  
-  if (ports.size > 0) {
-    const portList = Array.from(ports).sort((a, b) => a - b).slice(0, 30);
-    packetInfo.push(`\n--- Ports Used (${ports.size} unique) ---`);
-    packetInfo.push(portList.map(p => `${p} (${getServiceName(p)})`).join(', '));
-  }
-  
-  // Security observations
-  const securityNotes: string[] = [];
-  if (ports.has(23)) securityNotes.push('Telnet (port 23) detected - unencrypted protocol');
-  if (ports.has(21)) securityNotes.push('FTP (port 21) detected - credentials may be exposed');
-  if (ports.has(25)) securityNotes.push('SMTP (port 25) detected - email traffic');
-  if (ports.has(3389)) securityNotes.push('RDP (port 3389) detected - remote desktop access');
-  if (ports.has(22)) securityNotes.push('SSH (port 22) detected - encrypted remote access');
-  if (ports.has(443)) securityNotes.push('HTTPS (port 443) detected - encrypted web traffic');
-  if (ports.has(80)) securityNotes.push('HTTP (port 80) detected - unencrypted web traffic');
-  if (ports.has(53)) securityNotes.push('DNS (port 53) detected - name resolution traffic');
-  
-  if (securityNotes.length > 0) {
-    packetInfo.push(`\n--- Notable Services/Protocols ---`);
-    securityNotes.forEach(note => packetInfo.push(`• ${note}`));
-  }
-  
-  return packetInfo.join('\n');
-}
-
-// Parse classic pcap format
-function parsePcapClassic(bytes: Uint8Array, packetInfo: string[], isLittleEndian: boolean): string {
-  const readUint16 = (offset: number): number => {
-    if (isLittleEndian) {
-      return bytes[offset] | (bytes[offset + 1] << 8);
-    }
-    return (bytes[offset] << 8) | bytes[offset + 1];
-  };
-  
-  const readUint32 = (offset: number): number => {
-    if (isLittleEndian) {
-      return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
-    }
-    return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
-  };
-  
-  const versionMajor = readUint16(4);
-  const versionMinor = readUint16(6);
-  const snapLen = readUint32(16);
-  const linkType = readUint32(20);
-  
-  packetInfo.push(`Version: ${versionMajor}.${versionMinor}`);
-  packetInfo.push(`Snap Length: ${snapLen}`);
-  packetInfo.push(`Link Type: ${getLinkTypeName(linkType)}`);
-  
-  // Parse packets
-  let offset = 24;
-  let packetCount = 0;
-  const protocols: Record<string, number> = {};
-  const ipAddresses: Set<string> = new Set();
-  const ports: Set<number> = new Set();
-  let totalBytes = 0;
-  
-  while (offset + 16 <= bytes.length && packetCount < 2000) {
-    const capturedLen = readUint32(offset + 8);
-    const originalLen = readUint32(offset + 12);
-    
-    if (capturedLen === 0 || capturedLen > snapLen || offset + 16 + capturedLen > bytes.length) {
-      break;
-    }
-    
-    totalBytes += originalLen;
-    packetCount++;
-    
-    // Parse Ethernet frame
-    if (linkType === 1 && capturedLen >= 14) {
-      const packetStart = offset + 16;
-      const etherType = (bytes[packetStart + 12] << 8) | bytes[packetStart + 13];
-      
-      if (etherType === 0x0800) { // IPv4
-        protocols['IPv4'] = (protocols['IPv4'] || 0) + 1;
-        
-        if (capturedLen >= 34) {
-          const ipProtocol = bytes[packetStart + 23];
-          const srcIP = `${bytes[packetStart + 26]}.${bytes[packetStart + 27]}.${bytes[packetStart + 28]}.${bytes[packetStart + 29]}`;
-          const dstIP = `${bytes[packetStart + 30]}.${bytes[packetStart + 31]}.${bytes[packetStart + 32]}.${bytes[packetStart + 33]}`;
-          
-          ipAddresses.add(srcIP);
-          ipAddresses.add(dstIP);
-          
-          if (ipProtocol === 6) { // TCP
-            protocols['TCP'] = (protocols['TCP'] || 0) + 1;
-            if (capturedLen >= 38) {
-              const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
-              const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
-              ports.add(srcPort);
-              ports.add(dstPort);
-            }
-          } else if (ipProtocol === 17) { // UDP
-            protocols['UDP'] = (protocols['UDP'] || 0) + 1;
-            if (capturedLen >= 38) {
-              const srcPort = (bytes[packetStart + 34] << 8) | bytes[packetStart + 35];
-              const dstPort = (bytes[packetStart + 36] << 8) | bytes[packetStart + 37];
-              ports.add(srcPort);
-              ports.add(dstPort);
-            }
-          } else if (ipProtocol === 1) {
-            protocols['ICMP'] = (protocols['ICMP'] || 0) + 1;
-          }
-        }
-      } else if (etherType === 0x0806) {
-        protocols['ARP'] = (protocols['ARP'] || 0) + 1;
-      } else if (etherType === 0x86dd) {
-        protocols['IPv6'] = (protocols['IPv6'] || 0) + 1;
-      }
-    } else if (linkType === 101) {
-      // Raw IP
-      protocols['Raw IP'] = (protocols['Raw IP'] || 0) + 1;
-    }
-    
-    offset += 16 + capturedLen;
-  }
-  
-  packetInfo.push(`\n--- Packet Summary ---`);
-  packetInfo.push(`Total Packets: ${packetCount}`);
-  packetInfo.push(`Total Data: ${(totalBytes / 1024).toFixed(2)} KB`);
-  
-  if (Object.keys(protocols).length > 0) {
-    packetInfo.push(`\n--- Protocol Distribution ---`);
-    for (const [proto, count] of Object.entries(protocols).sort((a, b) => b[1] - a[1])) {
-      packetInfo.push(`${proto}: ${count} packets (${((count / packetCount) * 100).toFixed(1)}%)`);
-    }
-  }
-  
-  if (ipAddresses.size > 0) {
-    const ipList = Array.from(ipAddresses).slice(0, 20);
-    packetInfo.push(`\n--- IP Addresses Observed (${ipAddresses.size} unique) ---`);
-    packetInfo.push(ipList.join(', '));
-    if (ipAddresses.size > 20) {
-      packetInfo.push(`... and ${ipAddresses.size - 20} more`);
-    }
-  }
-  
-  if (ports.size > 0) {
-    const portList = Array.from(ports).sort((a, b) => a - b).slice(0, 30);
-    packetInfo.push(`\n--- Ports Used (${ports.size} unique) ---`);
-    packetInfo.push(portList.map(p => `${p} (${getServiceName(p)})`).join(', '));
-  }
-  
-  // Security observations
-  const securityNotes: string[] = [];
-  if (ports.has(23)) securityNotes.push('Telnet (port 23) detected - unencrypted protocol');
-  if (ports.has(21)) securityNotes.push('FTP (port 21) detected - credentials may be exposed');
-  if (ports.has(25)) securityNotes.push('SMTP (port 25) detected - email traffic');
-  if (ports.has(3389)) securityNotes.push('RDP (port 3389) detected - remote desktop access');
-  if (ports.has(22)) securityNotes.push('SSH (port 22) detected - encrypted remote access');
-  if (ports.has(443)) securityNotes.push('HTTPS (port 443) detected - encrypted web traffic');
-  if (ports.has(80)) securityNotes.push('HTTP (port 80) detected - unencrypted web traffic');
-  if (ports.has(53)) securityNotes.push('DNS (port 53) detected - name resolution traffic');
-  
-  if (securityNotes.length > 0) {
-    packetInfo.push(`\n--- Notable Services/Protocols ---`);
-    securityNotes.forEach(note => packetInfo.push(`• ${note}`));
-  }
-  
-  return packetInfo.join('\n');
-}
-
-function getLinkTypeName(linkType: number): string {
-  const linkTypes: Record<number, string> = {
-    0: 'NULL',
-    1: 'Ethernet',
-    6: 'Token Ring',
-    9: 'PPP',
-    10: 'FDDI',
-    101: 'Raw IP',
-    105: 'IEEE 802.11',
-    113: 'Linux Cooked',
-    127: 'IEEE 802.11 Radio',
-  };
-  return linkTypes[linkType] || `Unknown (${linkType})`;
-}
-
-function getServiceName(port: number): string {
-  const services: Record<number, string> = {
-    20: 'FTP-data',
-    21: 'FTP',
-    22: 'SSH',
-    23: 'Telnet',
-    25: 'SMTP',
-    53: 'DNS',
-    67: 'DHCP-server',
-    68: 'DHCP-client',
-    80: 'HTTP',
-    110: 'POP3',
-    123: 'NTP',
-    143: 'IMAP',
-    161: 'SNMP',
-    443: 'HTTPS',
-    445: 'SMB',
-    993: 'IMAPS',
-    995: 'POP3S',
-    3306: 'MySQL',
-    3389: 'RDP',
-    5432: 'PostgreSQL',
-    8080: 'HTTP-alt',
-  };
-  return services[port] || 'unknown';
-}
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -436,14 +17,27 @@ serve(async (req) => {
   try {
     console.log('Received analyze request');
     
-    const { fileName, fileSize, fileContent } = await req.json();
-    console.log('Processing file:', fileName, 'Size:', fileSize);
+    const { fileName, fileSize, fileContent, fileType } = await req.json();
+    console.log('Processing file:', fileName, 'Size:', fileSize, 'Type:', fileType);
 
-    // Parse the pcap file to extract network data
+    // The file content is now directly text (JSON or plain text exported from Wireshark)
     let networkData: string;
+    
     if (fileContent) {
-      networkData = parsePcapFile(fileContent, fileName);
-      console.log('Parsed pcap data length:', networkData.length);
+      // For JSON files, try to parse and format nicely
+      if (fileType === 'json') {
+        try {
+          const jsonData = JSON.parse(fileContent);
+          networkData = `File: ${fileName}\nFormat: JSON (Wireshark Export)\nFile Size: ${fileSize} bytes\n\n--- WIRESHARK PACKET DATA ---\n${JSON.stringify(jsonData, null, 2)}`;
+        } catch {
+          // If JSON parsing fails, use as-is
+          networkData = `File: ${fileName}\nFormat: JSON (Wireshark Export)\nFile Size: ${fileSize} bytes\n\n--- WIRESHARK PACKET DATA ---\n${fileContent}`;
+        }
+      } else {
+        // Plain text file
+        networkData = `File: ${fileName}\nFormat: Plain Text (Wireshark Export)\nFile Size: ${fileSize} bytes\n\n--- WIRESHARK PACKET DATA ---\n${fileContent}`;
+      }
+      console.log('Network data length:', networkData.length);
     } else {
       networkData = `Network capture file: ${fileName}, Size: ${(fileSize / 1024).toFixed(1)} KB`;
     }
@@ -451,18 +45,22 @@ serve(async (req) => {
     const systemPrompt = `ROLE:
 You are a senior cybersecurity analyst with expertise in network forensics and intrusion detection. You translate technical findings into clear, executive-level insights for small and medium business enterprise owners.
 
+CRITICAL INSTRUCTION:
+You are receiving REAL network traffic data exported from Wireshark. This is NOT simulated data. Analyze it thoroughly and provide ACCURATE, UNMODIFIED insights based on the ACTUAL content you receive. Do NOT make generic assumptions - analyze the specific packets, IPs, protocols, and patterns in the provided data.
+
 TASK:
-Analyze the provided structured network traffic data extracted from a Wireshark capture.
+Analyze the provided structured network traffic data exported from a Wireshark capture (either as JSON or Plain Text format).
 
 OBJECTIVES:
-- Identify suspicious or anomalous traffic patterns.
-- Classify potential attack types (e.g., scanning, DoS, malware, C2, data exfiltration).
-- Highlight affected IPs, ports, and protocols.
-- Assess severity and confidence level.
-- Recommend follow-up investigation steps or mitigations.
+- Identify ALL suspicious or anomalous traffic patterns based on the ACTUAL data provided.
+- Classify potential attack types (e.g., scanning, DoS, malware, C2, data exfiltration) based on what you ACTUALLY see.
+- Highlight affected IPs, ports, and protocols that are ACTUALLY present in the data.
+- Assess severity and confidence level based on REAL evidence in the traffic.
+- Recommend follow-up investigation steps or mitigations specific to the findings.
 
 OUTPUT REQUIREMENTS:
 Your responses must be:
+- Based ENTIRELY on the actual data provided - do NOT fabricate or assume traffic patterns
 - Written in plain English with NO technical jargon for the business owner
 - Focused on business impact, not technical details
 - Actionable and reassuring
@@ -477,28 +75,28 @@ For each identified threat, determine:
 
 You must respond with a valid JSON object containing exactly these eight fields:
 {
-  "whatIsHappening": "A simple explanation of what the network analysis shows based on the actual data. Include your confidence level.",
-  "whyItMatters": "The business impact and why the business owner should care. Be specific about potential consequences.",
+  "whatIsHappening": "A simple explanation of what the network analysis shows based on the ACTUAL data. Include your confidence level. Reference specific IPs, protocols, or patterns you observed.",
+  "whyItMatters": "The business impact and why the business owner should care. Be specific about potential consequences based on the REAL traffic patterns found.",
   "riskLevel": 1 to 5 (integer, where 1 is lowest risk and 5 is highest risk),
-  "riskDescription": "A detailed 2-3 sentence explanation including: what this risk level means for the business, why it was assigned this score based on the actual network data, your confidence in this assessment, and the potential impact if not addressed",
-  "actionToTake": "Clear, prioritized action steps based on severity. Include recommended follow-up investigation steps or mitigations.",
-  "cybersecurityNews": "2-3 relevant cybersecurity insights that relate to the specific attack types, protocols, or patterns found in this capture. Include practical awareness points and recent trends SMB owners should know about.",
-  "forensicAnalysis": "A deeper forensic review including: traffic timelines and patterns observed, any lateral movement indicators, persistence or beaconing patterns detected, false positive likelihood assessment, and additional technical context for security teams.",
+  "riskDescription": "A detailed 2-3 sentence explanation including: what this risk level means for the business, why it was assigned this score based on the ACTUAL network data, your confidence in this assessment, and the potential impact if not addressed",
+  "actionToTake": "Clear, prioritized action steps based on severity. Include recommended follow-up investigation steps or mitigations SPECIFIC to the threats found in this capture.",
+  "cybersecurityNews": "2-3 relevant cybersecurity insights that relate to the SPECIFIC attack types, protocols, or patterns found in THIS capture. Include practical awareness points and recent trends SMB owners should know about.",
+  "forensicAnalysis": "A deeper forensic review including: traffic timelines and patterns observed IN THIS DATA, any lateral movement indicators found, persistence or beaconing patterns detected, false positive likelihood assessment, and additional technical context for security teams. Reference SPECIFIC evidence from the provided data.",
   "threatMap": [
     {
       "threatType": "Name of the threat with classification (e.g., 'Port Scan - Reconnaissance', 'Suspicious DNS - Potential C2')",
-      "sourceIP": "Source IP address or 'Multiple' if from various sources",
-      "frequency": number of occurrences detected,
+      "sourceIP": "ACTUAL Source IP address from the data or 'Multiple' if from various sources",
+      "frequency": number of ACTUAL occurrences detected in the data,
       "likelihood": 1-5 based on how likely this is to be exploited,
       "impact": 1-5 based on potential damage if exploited,
       "severity": "low" | "medium" | "high",
-      "explanation": "Brief explanation including: why this threat falls in its position on the heat map, the confidence level of this detection, and what specific traffic patterns led to this classification"
+      "explanation": "Brief explanation including: why this threat falls in its position on the heat map, the confidence level of this detection, and what SPECIFIC traffic patterns in the provided data led to this classification"
     }
   ]
 }
 
 Threat Map Guidelines:
-- Include 0-6 threats based on what's actually found in the data
+- Include 0-6 threats based on what's ACTUALLY found in the data
 - If no concerning activity is found, return an empty array []
 - Likelihood scoring: 1=Rare/unlikely, 2=Uncommon, 3=Possible, 4=Likely, 5=Almost certain
 - Impact scoring: 1=Negligible, 2=Minor, 3=Moderate, 4=Major, 5=Severe/Critical
@@ -511,32 +109,37 @@ Risk Level Guidelines:
 - 4: High risk - Significant security concerns requiring prompt attention (e.g., suspicious connections, dangerous services).
 - 5: Critical risk - Immediate action required (e.g., active threats, known malicious patterns, data exfiltration indicators).
 
-IMPORTANT: Return your analysis EXACTLY as structured above. Do NOT modify, summarize, or interpret the findings. Pass through your expert analysis verbatim in the JSON format.
+IMPORTANT: Return your analysis EXACTLY as the expert cybersecurity analyst would provide it. Do NOT modify, summarize, or soften the findings. Pass through your expert analysis verbatim in the JSON format based on the REAL data provided.
 
 Always respond with ONLY the JSON object, no additional text.`;
 
-    const userPrompt = `STRUCTURED NETWORK TRAFFIC DATA:
+    const userPrompt = `STRUCTURED NETWORK TRAFFIC DATA (Exported from Wireshark):
 ${networkData}
 
 ANALYSIS REQUEST:
-Analyze the above network capture data extracted from a Wireshark PCAP file. As a senior cybersecurity analyst:
+Analyze the above network traffic data that was exported from a Wireshark capture file. This is REAL network data - analyze it thoroughly and accurately.
 
-1. Identify all suspicious or anomalous traffic patterns
-2. Classify any potential attack types (scanning, DoS, malware, C2, data exfiltration, etc.)
-3. Highlight affected IPs, ports, and protocols
-4. Assess severity with confidence levels
-5. Provide recommended follow-up investigation steps or mitigations
+As a senior cybersecurity analyst, perform a comprehensive analysis:
+
+1. Examine ALL packets, connections, and protocols in the provided data
+2. Identify any suspicious or anomalous traffic patterns based on what you ACTUALLY see
+3. Classify any potential attack types (scanning, DoS, malware, C2, data exfiltration, etc.) with evidence from the data
+4. List the affected IPs, ports, and protocols that are ACTUALLY present
+5. Assess severity with confidence levels based on REAL evidence
+6. Provide recommended follow-up investigation steps or mitigations specific to these findings
 
 FOLLOW-UP FORENSIC ANALYSIS:
-Based on the initial analysis, perform a deeper forensic review focusing on:
-- Traffic timelines and temporal patterns
-- Lateral movement indicators across the network
+Based on the initial analysis of the ACTUAL data, perform a deeper forensic review focusing on:
+- Traffic timelines and temporal patterns observed in the data
+- Lateral movement indicators across the network visible in the capture
 - Persistence or beaconing patterns that suggest ongoing compromise
-- False positive likelihood for each finding
+- False positive likelihood for each finding based on the context
 
-Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, forensicAnalysis, and threatMap.`;
+Respond with ONLY a JSON object containing: whatIsHappening, whyItMatters, riskLevel, riskDescription, actionToTake, cybersecurityNews, forensicAnalysis, and threatMap.
 
-    console.log('Calling Lovable AI Gateway with parsed pcap data');
+CRITICAL: Base your ENTIRE analysis on the ACTUAL data provided above. Do NOT make generic assumptions or provide templated responses. Reference specific IPs, ports, protocols, and patterns you observe in the data.`;
+
+    console.log('Calling Lovable AI Gateway with Wireshark export data');
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
